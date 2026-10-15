@@ -210,6 +210,81 @@ final class NativeVoiceHostTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(controller.attempt?.id, secondID)
         controller.retire()
     }
+    @MainActor func testHiddenConversationStopsOnlyItsExactVoiceViewAndPreservesAudio() async throws {
+        let directory = root(); defer { try? FileManager.default.removeItem(at: directory) }
+        let socket = VoiceHostSocket()
+        let controller = try NativeVoiceController(directory: directory, serviceURL: "wss://speech.invalid/v1/speech",
+            driver: VoiceHostDriver(), socketFactory: VoiceHostSocketFactory(socket: socket)) {
+                let seed = Data(0..<32), key = try Curve25519.Signing.PrivateKey(rawRepresentation: seed)
+                return .init(publicKey: key.publicKey.rawRepresentation, tweetNaClSecretKey: seed + key.publicKey.rawRepresentation)
+            }
+        let created = try await controller.store.create(scope: .init(connectionID: route.connectionID, agentID: route.agentID, sessionKey: route.sessionID), draft: "unsent")
+        _ = try await controller.store.append(Data([0, 0]), to: created.id); try await controller.store.close(created.id)
+        let saved = try await controller.store.recording(created.id)
+        let attempt = try XCTUnwrap(controller.retry(saved, context: context(ComposerDraft(conversationID: route))))
+        let client = NativeAppModel(); client.voice = controller
+        let oldView = UUID(), currentView = UUID(), selection = client.selectionRevision
+        client.handle(.conversationVisibilityChanged(route, viewID: oldView, visible: true))
+        client.handle(.conversationVisibilityChanged(route, viewID: currentView, visible: true))
+        client.handle(.conversationVisibilityChanged(route, viewID: oldView, visible: false))
+        XCTAssertEqual(controller.attempt?.id, attempt)
+        client.handle(.conversationVisibilityChanged(route, viewID: currentView, visible: false))
+        XCTAssertNil(controller.attempt)
+        XCTAssertEqual(client.selectionRevision, selection) // Native Back does not cancel the selected route's read.
+        let retained = try await controller.store.recording(saved.id); XCTAssertEqual(retained.bytes, 2)
+    }
+
+    @MainActor func testComposerVoiceActionsOwnActual44PointNativeHitTargets() async throws {
+        let cases: [(String, VoicePresentation, VoiceIntent)] = [
+            ("voice-stop", .init(phase: .recording, label: "Recording", canStop: true), .stop),
+            ("voice-retry", .init(phase: .failed, label: "Saved", canRetry: true), .retry),
+            ("voice-saved-recording", .init(phase: .recoverable, label: "Saved", canReview: true), .showRecordings)]
+        for (identifier, voice, expected) in cases {
+            let draft = ComposerDraft(conversationID: route); draft.voice = voice
+            var actions: [VoiceIntent] = []
+            let composer = NativeComposer(draft: draft,
+                conversation: .init(id: route, agentName: "Agent", sessionTitle: "Voice"), expanded: .constant(false),
+                onIntent: { if case let .voice(_, action) = $0 { actions.append(action) } }, showModels: {})
+            let host = UIHostingController(rootView: composer.disabled(false))
+            let window = attach(host); defer { window.isHidden = true; window.rootViewController = nil }
+            await layout(host)
+            let element = try XCTUnwrap(descendants(host.view, of: UIButton.self).first { $0.accessibilityIdentifier == identifier })
+            assertNativeActionTarget(element, in: window)
+            element.sendActions(for: .touchUpInside)
+            XCTAssertEqual(actions, [expected])
+            host.rootView = composer.disabled(true)
+            await layout(host)
+            let disabled = try XCTUnwrap(descendants(host.view, of: UIButton.self).first { $0.accessibilityIdentifier == identifier })
+            XCTAssertFalse(disabled.isEnabled)
+            XCTAssertTrue(disabled.accessibilityTraits.contains(.notEnabled))
+        }
+    }
+
+    @MainActor func testSavedRecordingRetryAndDeleteOwn44PointNativeHitTargets() async throws {
+        let directory = root(); defer { try? FileManager.default.removeItem(at: directory) }
+        let controller = try NativeVoiceController(directory: directory, serviceURL: "", driver: VoiceHostDriver()) { throw SpeechFailure(.authentication) }
+        _ = try await recording(controller.store); await controller.restore()
+        let request = NativeVoiceSheetRequest(context: context(ComposerDraft(conversationID: route)))
+        let client = NativeAppModel(); client.voice = controller; client.voiceSheet = request
+        let host = UIHostingController(rootView: NativeVoiceSheet(client: client, voice: controller, request: request))
+        let window = attach(host); defer { window.isHidden = true; window.rootViewController = nil }
+        await layout(host)
+        for identifier in ["voice-recording-retry", "voice-recording-delete"] {
+            let element = try XCTUnwrap(descendants(host.view, of: UIButton.self).first { $0.accessibilityIdentifier == identifier })
+            assertNativeActionTarget(element, in: window)
+        }
+    }
+
+    @MainActor private func assertNativeActionTarget(_ button: UIButton, in window: UIWindow) {
+        // This is the actual UIKit control receiving the action, not an outer SwiftUI frame.
+        let frame = button.convert(button.bounds, to: window)
+        XCTAssertGreaterThanOrEqual(frame.width, 44); XCTAssertGreaterThanOrEqual(frame.height, 44)
+        XCTAssertTrue(button.point(inside: CGPoint(x: 1, y: 1), with: nil))
+        XCTAssertTrue(button.point(inside: CGPoint(x: button.bounds.width - 1, y: button.bounds.height - 1), with: nil))
+        XCTAssertTrue(button.isAccessibilityElement); XCTAssertTrue(button.accessibilityTraits.contains(.button))
+        XCTAssertFalse(button.accessibilityLabel?.isEmpty ?? true)
+    }
+
     @MainActor private func eventually(_ condition: () async -> Bool) async {
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
         while ContinuousClock.now < deadline { if await condition() { return }; await Task.yield() }
