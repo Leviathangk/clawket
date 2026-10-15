@@ -17,10 +17,12 @@ struct ClientSheetView: View {
                 case let .models(route): models(route)
                 case let .catalog(id): catalog(id)
                 case .connectionApprovals: connectionApprovals
+                case let .work(route, workID):
+                    NativeWorkInspector(model: model, conversationID: route, workID: workID, onIntent: onIntent)
                 }
             }
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItem(placement: dismissalPlacement) {
                     Button("Done") { dismiss() }
                 }
             }
@@ -31,6 +33,12 @@ struct ClientSheetView: View {
             if case let .catalog(id) = item, let route, route.isConcrete,
                route.connectionID == id.connectionID, route.agentID == id.agentID { dismiss() }
         }
+    }
+
+    private var dismissalPlacement: ToolbarItemPlacement {
+        // Work details push into this stack; keep Done opposite the native Back button.
+        if case .work = item { return .confirmationAction }
+        return .cancellationAction
     }
 
     private func sessions(_ route: ConversationID) -> some View {

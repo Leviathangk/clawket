@@ -355,16 +355,43 @@ public struct QuestionPresentation: Identifiable, Hashable, Sendable {
     public var error: String?
     public var canSubmit: Bool
     public var canCancel: Bool
+    /// Local editing permission is separate from wire response/cancellation authority.
+    /// Without an explicit override, it follows canSubmit even on a copied held review.
+    public var canEdit: Bool {
+        get { explicitCanEdit ?? canSubmit }
+        set { explicitCanEdit = newValue }
+    }
+    private var explicitCanEdit: Bool?
+    /// Only authoritative acceptance of this exact local answer may set this true.
+    public var responseIsAccepted: Bool
     /// Only the pressed action spins. Unknown delivery must disable actions without claiming a submission.
     public var submittingAction: Submission?
 
     public init(id: String, title: String, detail: String? = nil, fields: [QuestionField],
                 isSubmitting: Bool = false, resolvedLabel: String? = nil,
                 error: String? = nil, canSubmit: Bool = true, kind: Kind = .form,
-                canCancel: Bool = false, submittingAction: Submission? = nil) {
+                canCancel: Bool = false, submittingAction: Submission? = nil,
+                canEdit: Bool? = nil, responseIsAccepted: Bool = false) {
         self.id = id; self.title = title; self.detail = detail; self.fields = fields
         self.isSubmitting = isSubmitting; self.resolvedLabel = resolvedLabel; self.error = error; self.canSubmit = canSubmit
         self.kind = kind; self.canCancel = canCancel; self.submittingAction = submittingAction
+        self.explicitCanEdit = canEdit; self.responseIsAccepted = responseIsAccepted
+    }
+
+    public var canEditFields: Bool { canEdit && !isSubmitting && submittingAction == nil && resolvedLabel == nil }
+
+    public var showsAnswerActions: Bool {
+        guard resolvedLabel == nil else { return false }
+        if canSubmit { return true }
+        switch submittingAction {
+        case .answer?: return kind != .confirm
+        case .confirm?: return kind == .confirm
+        case .cancel?, nil: return false
+        }
+    }
+
+    public var showsCancelAction: Bool {
+        resolvedLabel == nil && (canCancel || submittingAction == .cancel)
     }
 }
 
@@ -430,18 +457,20 @@ public struct ConversationPresentation: Identifiable, Hashable, Sendable {
     public var isLoading: Bool
     public var isLoadingHistory: Bool
     public var features: [ClientFeature: ActionAvailability]
+    public var work: WorkDockPresentation?
 
     public init(id: ConversationID, agentName: String, sessionTitle: String, subtitle: String? = nil,
                 messages: [MessagePresentation] = [], connection: ConnectionPresentation = .init(),
                 sessions: [SessionPresentation] = [], models: [ModelPresentation] = [],
                 modelTitle: String? = nil, modelScopeLabel: String? = nil, sendLabel: String = String(localized: "Send"),
                 isLoading: Bool = false, isLoadingHistory: Bool = false,
-                features: [ClientFeature: ActionAvailability] = [:]) {
+                features: [ClientFeature: ActionAvailability] = [:], work: WorkDockPresentation? = nil) {
         self.id = id; self.agentName = agentName; self.sessionTitle = sessionTitle; self.subtitle = subtitle
         self.messages = messages; self.connection = connection; self.sessions = sessions; self.models = models
         self.modelTitle = modelTitle; self.modelScopeLabel = modelScopeLabel; self.isLoading = isLoading
         self.sendLabel = sendLabel
         self.isLoadingHistory = isLoadingHistory; self.features = features
+        self.work = work
     }
 
     public func availability(_ feature: ClientFeature) -> ActionAvailability { features[feature] ?? .unsupported }
@@ -564,5 +593,8 @@ public enum ClientIntent: Sendable {
     case questionDraftChanged(questionID: String, response: QuestionResponse)
     case answerQuestion(questionID: String, response: QuestionResponse)
     case cancelQuestion(questionID: String)
+    /// Read-only intent. The host may mark this exact work record read or load bounded data.
+    case workInspectorOpened(ConversationID, workID: String)
+    case workStepOpened(ConversationID, workID: String, recordID: String, stepID: String)
     case openURL(URL)
 }

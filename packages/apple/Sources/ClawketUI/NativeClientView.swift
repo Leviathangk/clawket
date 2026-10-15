@@ -8,6 +8,8 @@ public struct NativeClientView: View {
     private let onIntent: @MainActor (ClientIntent) -> Void
     @State private var sheet: ClientSheet?
     @State private var search = ""
+    @State private var rosterSelection: ConversationID?
+    @State private var didSynchronizeSelection = false
 
     public init(model: ClientPresentation, onIntent: @escaping @MainActor (ClientIntent) -> Void) {
         self.model = model
@@ -52,8 +54,19 @@ public struct NativeClientView: View {
             }
         }
         .onChange(of: model.selectedConversation) { route in
+            // Synchronize the sidebar directly; do not run its user-selection setter.
+            rosterSelection = RosterSelectionPolicy.row(for: route, agents: model.agents)
             if let route { onIntent(.openConversation(route)) }
             else { onIntent(.closeConversation) }
+        }
+        .onChange(of: model.agents) { agents in
+            rosterSelection = RosterSelectionPolicy.rowAfterRosterRefresh(
+                currentRow: rosterSelection, selected: model.selectedConversation, agents: agents)
+        }
+        .onAppear {
+            guard !didSynchronizeSelection else { return }
+            didSynchronizeSelection = true
+            rosterSelection = RosterSelectionPolicy.row(for: model.selectedConversation, agents: model.agents)
         }
     }
 
@@ -71,7 +84,7 @@ public struct NativeClientView: View {
     }
 
     private var roster: some View {
-        List(selection: $model.selectedConversation) {
+        List(selection: rosterSelectionBinding) {
             if model.agents.isEmpty {
                 if model.isLoading {
                     VStack(spacing: 20) {
@@ -153,6 +166,16 @@ public struct NativeClientView: View {
                 }
             }
             ToolbarItem(placement: .navigationBarTrailing) {
+                if model.availability(.refresh).isVisible {
+                    Button { onIntent(.refresh) } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .disabled(!model.availability(.refresh).isEnabled)
+                    .accessibilityIdentifier("roster-refresh")
+                }
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
                 if model.availability(.addConnection).isVisible || model.availability(.createAgent).isVisible {
                     Menu {
                         if model.availability(.createAgent).isVisible {
@@ -181,17 +204,17 @@ public struct NativeClientView: View {
                 }
             }
         }
-        .modifier(RefreshIfAvailable(availability: model.availability(.refresh), action: { onIntent(.refresh) }))
     }
-}
 
-@MainActor
-private struct RefreshIfAvailable: ViewModifier {
-    var availability: ActionAvailability
-    var action: () -> Void
-    @ViewBuilder func body(content: Content) -> some View {
-        if availability.isEnabled { content.refreshable { action() } }
-        else { content }
+    private var rosterSelectionBinding: Binding<ConversationID?> {
+        Binding(get: { rosterSelection }, set: { proposed in
+            let previous = rosterSelection
+            rosterSelection = proposed
+            if let route = RosterSelectionPolicy.explicitConversation(
+                proposedRow: proposed, previousRow: previous, agents: filteredAgents) {
+                model.selectedConversation = route
+            }
+        })
     }
 }
 
@@ -317,12 +340,14 @@ struct ConnectionStatusView: View {
 
 enum ClientSheet: Identifiable {
     case sessions(ConversationID), models(ConversationID), catalog(AgentCatalogID), connectionApprovals
+    case work(ConversationID, workID: String)
     var id: String {
         switch self {
         case let .sessions(route): "sessions-\(route.connectionID)-\(route.agentID)"
         case let .models(route): "models-\(route.connectionID)-\(route.agentID)"
         case let .catalog(id): "catalog-\(id.connectionID)-\(id.agentID)"
         case .connectionApprovals: "connection-approvals"
+        case let .work(route, workID): "work-\(route.connectionID)-\(route.agentID)-\(route.sessionID)-\(workID)"
         }
     }
 }
@@ -375,6 +400,13 @@ private struct NativeConversationView: View {
             .opacity(expanded ? 0 : 1)
             .accessibilityHidden(expanded)
 
+            if let work = conversation.work, work.inspect.isVisible, !work.id.isEmpty {
+                NativeWorkDock(work: work) {
+                    guard let intent = work.openIntent(conversationID: conversation.id) else { return }
+                    onIntent(intent)
+                    showSheet(.work(conversation.id, workID: work.id))
+                }
+            }
             NativeComposer(draft: draft, conversation: conversation, expanded: $expanded,
                            onIntent: { intent in
                                if case .send = intent { scrollRequest += 1 }
