@@ -90,8 +90,16 @@ struct NativeComposer: View {
         .background(Color(uiColor: .systemBackground))
         .onChange(of: draft.insertion?.id) { _ in
             guard let insertion = draft.insertion else { return }
-            input.insertText(insertion.text)
-            draft.insertion = nil
+            if insertion.expectedRevision != nil { input.commitMarkedText() }
+            if let revision = insertion.expectedRevision, revision != draft.editRevision {
+                if insertion.acknowledgement { onIntent(.composerInsertionApplied(conversation.id, insertionID: insertion.id, text: nil)) }
+                if draft.insertion?.id == insertion.id { draft.insertion = nil }; return
+            }
+            let text = input.insertText(insertion.text, replacingText: insertion.replacingText)
+            if insertion.acknowledgement {
+                onIntent(.composerInsertionApplied(conversation.id, insertionID: insertion.id, text: text))
+            }
+            if draft.insertion?.id == insertion.id { draft.insertion = nil }
         }
     }
 
@@ -103,7 +111,7 @@ struct NativeComposer: View {
         (conversation.availability(.models).isVisible && conversation.modelTitle != nil) || input.lineCount >= 3 || expanded
     }
     private var hasAddActions: Bool {
-        [ClientFeature.photos, .camera, .files, .paste, .skills, .commands, .schedule, .tools, .sessionFiles]
+        [ClientFeature.photos, .camera, .files, .paste, .voice, .skills, .commands, .schedule, .tools, .sessionFiles]
             .contains { conversation.availability($0).isVisible }
     }
 
@@ -113,6 +121,15 @@ struct NativeComposer: View {
             attachmentAction("Camera", symbol: "camera", feature: .camera, source: .camera)
             attachmentAction("Files", symbol: "doc", feature: .files, source: .files)
             attachmentAction("Paste", symbol: "doc.on.clipboard", feature: .paste, source: .paste)
+            if conversation.availability(.voice).isVisible {
+                Button {
+                    input.commitMarkedText()
+                    onIntent(.voice(conversation.id, action: draft.voice?.phase == .recording ? .stop : .start))
+                } label: {
+                    Label(draft.voice?.phase == .recording ? String(localized: "Stop voice input") : String(localized: "Voice input"), systemImage: "mic")
+                }
+                    .disabled(!conversation.availability(.voice).isEnabled)
+            }
             if [ClientFeature.skills, .commands, .schedule, .tools, .sessionFiles].contains(where: { conversation.availability($0).isVisible }) {
                 Divider()
                 destinationAction("Use a skill", symbol: "sparkles", feature: .skills, destination: .skills)
@@ -137,6 +154,7 @@ struct NativeComposer: View {
             } else if !conversation.availability(.stop).isVisible && conversation.availability(.voice).isVisible {
                 VoiceCaptureControl(isRecording: draft.voice?.phase == .recording,
                                     isEnabled: conversation.availability(.voice).isEnabled) { action in
+                    if action == .start { input.commitMarkedText() }
                     onIntent(.voice(conversation.id, action: action))
                 }
                 .frame(width: 44, height: 48)
@@ -193,13 +211,21 @@ struct NativeComposer: View {
 
     private func voiceStatus(_ voice: VoicePresentation) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: voice.phase == .recording ? "mic.fill" : "waveform")
-                .foregroundStyle(voice.phase == .recording ? Color.red : Color.secondary)
+            if voice.phase == .recording, let level = voice.level {
+                HStack(spacing: 2) {
+                    ForEach(0..<5) { index in
+                        Capsule().fill(Color.red).frame(width: 3, height: 4 + CGFloat(level) * [10.0, 16, 22, 15, 8][index])
+                    }
+                }.frame(width: 24, height: 28).accessibilityHidden(true)
+            } else { Image(systemName: "waveform").foregroundStyle(.secondary) }
             VStack(alignment: .leading, spacing: 3) {
                 Text(voice.label).font(.subheadline.weight(.medium))
-                if let detail = voice.detail { Text(detail).font(.caption).foregroundStyle(.secondary) }
+                if let detail = voice.detail { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
             }
             Spacer(minLength: 0)
+            if voice.canReview {
+                Button("Saved recording") { onIntent(.voice(conversation.id, action: .showRecordings)) }.frame(minHeight: 44)
+            }
             if voice.canRetry {
                 Button("Retry") { onIntent(.voice(conversation.id, action: .retry)) }.frame(minHeight: 44)
             }
@@ -338,11 +364,13 @@ private final class NativeInputController: NSObject, ObservableObject, UITextVie
         onChange?(textView.text)
     }
 
-    func insertText(_ text: String) {
+    @discardableResult func insertText(_ text: String, replacingText: Bool = false) -> String {
         textView.unmarkText()
+        if replacingText { textView.selectedRange = NSRange(location: 0, length: textView.text.utf16.count) }
         textView.insertText(text)
         onChange?(textView.text)
         measure()
+        return textView.text
     }
 
     private func measure() {
