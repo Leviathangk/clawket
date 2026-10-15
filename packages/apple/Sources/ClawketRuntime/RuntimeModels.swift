@@ -105,6 +105,10 @@ public struct RuntimeCapabilities: Codable, Sendable, Equatable {
     public var questions = false
     public var executionApprovals = false
     public var pairingApprovals = false
+    public var attachments = false
+    public var fileAttachments = false
+    public var documentAttachments = false
+    public var artifacts = false
     public init() {}
 }
 
@@ -194,6 +198,12 @@ public struct RuntimeMessage: Codable, Sendable, Equatable, Identifiable {
     /// Local provenance is never trusted from a backend frame.
     public let sentLocally: Bool
     public let raw: JSONValue
+    public var attachments: [RuntimeMessageAttachment] { RuntimeAttachmentProjection.extract(raw) }
+    /// Legacy inline images/files are decoded only on explicit consumption,
+    /// never while constructing presentation metadata. Managed IDs win over bytes.
+    public func inlineAttachmentData(at index: Int) throws -> Data? {
+        try RuntimeAttachmentProjection.inlineData(raw, index: index)
+    }
 }
 
 public struct RuntimeHistory: Codable, Sendable, Equatable {
@@ -218,8 +228,18 @@ public struct RuntimePrompt: Codable, Sendable, Equatable {
     public let idempotencyKey: String
     public let thinkingLevel: String?
     public let skillID: String?
-    public init(text: String, idempotencyKey: String = UUID().uuidString.lowercased(), thinkingLevel: String? = nil, skillID: String? = nil) {
+    public let attachments: [RuntimePromptAttachment]
+    public init(text: String, idempotencyKey: String = UUID().uuidString.lowercased(), thinkingLevel: String? = nil, skillID: String? = nil,
+                attachments: [RuntimePromptAttachment] = []) {
         self.text = text; self.idempotencyKey = idempotencyKey; self.thinkingLevel = thinkingLevel; self.skillID = skillID
+        self.attachments = attachments
+    }
+    private enum CodingKeys: String, CodingKey { case text, idempotencyKey, thinkingLevel, skillID, attachments }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(text: try values.decode(String.self, forKey: .text), idempotencyKey: try values.decode(String.self, forKey: .idempotencyKey),
+                  thinkingLevel: try values.decodeIfPresent(String.self, forKey: .thinkingLevel), skillID: try values.decodeIfPresent(String.self, forKey: .skillID),
+                  attachments: try values.decodeIfPresent([RuntimePromptAttachment].self, forKey: .attachments) ?? [])
     }
 }
 
@@ -233,6 +253,12 @@ public struct RuntimeModel: Codable, Sendable, Equatable, Identifiable {
     public let name: String
     public let provider: String?
     public let selected: Bool
+    public let input: [String]?
+    /// Missing/empty metadata is unknown, matching Mobile's composer guard.
+    public var supportsImages: Bool? { guard let input, !input.isEmpty else { return nil }; return input.contains("image") }
+    public init(id: String, name: String, provider: String? = nil, selected: Bool, input: [String]? = nil) {
+        self.id = id; self.name = name; self.provider = provider; self.selected = selected; self.input = input
+    }
 }
 
 public struct RuntimeTextUpdate: Sendable, Equatable {
