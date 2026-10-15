@@ -127,7 +127,9 @@ public actor MediaLibrary {
     public func preparePrompt(_ id: UUID) throws -> PreparedMedia {
         let value = try resource(id), url = try resourceURL(id)
         try Task.checkCancellation()
-        if value.mimeType.hasPrefix("image/") { return try MediaImages.prepare(resource: value, url: url) }
+        if value.mimeType.hasPrefix("image/"), value.mimeType != "image/svg+xml" {
+            return try MediaImages.prepare(resource: value, url: url)
+        }
         guard value.byteCount <= MediaLimits.promptBytes else { throw MediaFailure.tooLarge }
         return PreparedMedia(resource: value, data: try Data(contentsOf: url), mimeType: value.mimeType, isImage: false, thumbnail: nil, aspectRatio: nil)
     }
@@ -138,14 +140,36 @@ public actor MediaLibrary {
         return try MediaImages.preview(url: resourceURL(id), pixels: maximumPixels)
     }
 
+    /// Selected camera/HEIC/large-photo sources use the already bounded prompt
+    /// normalization before preview. This never relaxes artifact preview limits.
+    public func previewInput(_ id: UUID, maximumPixels: Int = 1_600) throws -> MediaImagePreview {
+        guard (44...2_048).contains(maximumPixels) else { throw MediaFailure.unsupported }
+        let prepared = try preparePrompt(id)
+        guard prepared.isImage else { throw MediaFailure.unsupported }
+        return try MediaImages.preview(data: prepared.data, pixels: maximumPixels)
+    }
+
+    /// Reads only already-owned verified bytes. Stable metadata grants no network authority.
+    public func cachedArtifact(key: MediaArtifactKey, now: Date = Date()) throws -> MediaResource? {
+        try validateArtifactKey(key)
+        guard !unavailable else { throw MediaFailure.corrupt }
+        guard let entry = entries.values.first(where: { $0.artifact == key && now.timeIntervalSince($0.resource.createdAt) < 86_400 }) else { return nil }
+        _ = try resourceURL(entry.resource.id)
+        return entry.resource
+    }
+
+    private func validateArtifactKey(_ key: MediaArtifactKey) throws {
+        guard !key.connectionID.isEmpty, key.connectionID.utf8.count <= 256,
+              !key.sessionKey.isEmpty, key.sessionKey.utf8.count <= 1_024,
+              !key.artifactID.isEmpty, key.artifactID.utf8.count <= 512 else { throw MediaFailure.invalidFile }
+    }
+
     /// One task per stable scope/reference; writes one chunk at a time. `read`
     /// must be backed by a captured RuntimeArtifactHandle, never an arbitrary URL.
     public func cacheArtifact(key: MediaArtifactKey, name: String, mimeType: String, size: Int,
                               read: @escaping @Sendable (Int) async throws -> Data) async throws -> MediaResource {
-        guard !key.connectionID.isEmpty, key.connectionID.utf8.count <= 256,
-              !key.sessionKey.isEmpty, key.sessionKey.utf8.count <= 1_024,
-              !key.artifactID.isEmpty, key.artifactID.utf8.count <= 512,
-              size >= 0, size <= MediaLimits.artifactBytes else { throw MediaFailure.invalidFile }
+        try validateArtifactKey(key)
+        guard size >= 0, size <= MediaLimits.artifactBytes else { throw MediaFailure.invalidFile }
         let name = try mediaName(name), mime = try mediaMIME(mimeType)
         if let cached = entries.values.first(where: { $0.artifact == key && Date().timeIntervalSince($0.resource.createdAt) < 86_400 }) {
             do {
