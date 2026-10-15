@@ -1,5 +1,15 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-16 原生 iOS 本地化首批源码（负责人授权，完整 19 语言仍为最终迁移门槛）。
+  - 按真实 `ClawketUI` 八份源码与 native host 清点 188 条界面/无障碍文案，新增主 App bundle 字符串目录及逐项来源清单。64 条术语复用现有 Mobile 19 语言译文；英文、简中、繁中、日文当前各 188/188，其余 15 语言各 64/188，未翻译的 124 条明确缺省，不复制英文伪造完成。
+  - `docs/native-ios/LOCALIZATION.md` 记录 host 动态状态、默认文案、条件标题及 UI helper 的本地化调用点；用户/后端文本、名称、模型、路径、代码与命令保持原文。此任务不改写 host/UI 源码或资源工程配置，后续由对应 owner 接入。catalog 使用手工维护项，避免 Swift Package 源文案未被 App 提取时误删。
+  - 单文件 Node 验证 5 项通过，覆盖实际四语言 QA 范围、缺失/空输入与译文、占位符类型/重排及阿拉伯语六种复数类别；明确 QA 模式列出全部 19 语言覆盖率，最终默认模式在缺少 15 语言时保持失败。实际 App 资源编译、语言切换/RTL/长文案、VoiceOver 及设备验收未完成，不声称 19 语言本地化已完成，无分发或发布。
+
+- 2026-10-16 Native iOS N2 集成进行中（未完成 App 验收）。
+  - 新增维护式 `apps/ios/Clawket.xcodeproj`，SwiftUI host 直接绑定原生配对/后端/表示层，iOS16.4、iPhone/iPad、独立 `com.p697.clawket.nativeqa`；不含 RN/JS/WebView，不改商店 bundle、版本或现有 Mobile 实现。Keychain 凭据、只读缓存标记、草稿及有界队列分连接/Agent/会话存储；先验证写入再派发，进程中断将 sending 置为 uncertain、queued 置为 held，不自动重放。
+  - `ClawketPersistence` 在 heavy 租约、jobs=2 下逐文件通过 DocumentStoreTests 8 项与 FileValueStoreTests 2 项，覆盖回滚、损坏、读回失败、异步事务串行、旧范围碰撞、文件大小与符号链接。完整 App 已在本机编译通过 Simulator 与独立手机 Debug 开发版；此前提交的 CI 实际构建 host 并通过四项恢复/隔离/旧版本覆盖/重复ID测试及全部仓库门禁。新增第五项真实开发 Keychain 读写删除测试，使用模拟器 ad-hoc 签名并以非空 xcresult 检查防止减少测试，等待本轮 CI。
+  - Native host 本轮只接入已实现能力；目录优先、真实连接/历史/文本收发/模型/停止、原生扫码及缓存/队列正做联调。已接入实际会话创建/项目选择及结果未知时的刷新门槛；附件、审批/提问、完整管理、付费、语音、Node、分享/Widget、19语言与同 bundle 升级仍按 `docs/native-ios/PARITY.md` 保持待办，不把包编译/合成报文称为完整功能或真机推理证据。首轮正确 USB 手机 WebDriver 已确认安装、启动、中文首页；点击连接入口发现 EnvironmentObject sheet 注入崩溃，读取该 QA App 崩溃栈定位后改为显式 ObservedObject，需复测。真实连接/IME/VoiceOver、OpenClaw/Hermes 稳定性验收尚未完成；未制作分发包、覆盖商店 App、上传、提审或发布。
+
 - 2026-10-16 Native iOS 后端运行时基础（负责人授权原生重构，iOS 优先）。
   - 新增 `ClawketRuntime`：六后端/传输/环境独立建模、注入凭据存储、单活动连接与事件读取者、Socket/认证/历史代际围栏、前后台真实探测及重连。OpenClaw 保留 v3 Ed25519、作用域设备令牌、一次失效修复与移动 setup 的 operator 交接；Hermes 验证实际 API 健康，四种 SDK 路径验证精确后端身份，原始 open 不进入 ready。
   - 实现文字收发/停止/历史、Agent/会话目录、真实新建会话、协商项目和模型选择；sessions-first 入口不编造 main 会话，完整冻结目录限制 64 KiB 分页、10,000 会话/8 MiB、512 次/90 秒与一次过期重取。流式段落跨工具保留独立 ID，final-only 回复可见；停止 ACK 不伪造完成，未知发送不自动重放。外层 Bridge `meta` 保留独立响应接口；长模型切换保留原有 190 秒预算。
