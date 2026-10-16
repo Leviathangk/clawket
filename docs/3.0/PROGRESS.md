@@ -1,5 +1,14 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-16 Native 根 sheet 交接（独立候选，完整CI执行待续）。
+  - 旧QA app实际WebDriver已复现 Settings→内嵌Connections→Add 仍停Settings、连接表单未出现。Add改为关闭真正拥有它的root destination，在实际onDismiss消费精确request/原presentation UUID及activation/selection后打开Connect；重复Add幂等，替换destination取消，Pro续办复用，不再350ms猜关闭时机。
+  - 共享生产NativeAppRootView供真实UIKit宿主复用，App独占start/scene观察；destination退休期间root不抢alert，稳定sheet内仍显示错误。notice有独立代次，自动binding nil不等于确认，只有当前owner的冻结OK精确消费，旧相同文案确认不清新提示。认证、device approval、后端/传输、RN默认均不改。
+  - 新3个App方法覆盖实际root Settings→Add helper→实际onDismiss→Connect→重开Settings、真实Connect关闭同turn注入authenticationRequired→实际UIAlert→生产ack helper→重开Settings，以及context/A→B→A/同文案代次。没有伪称点了系统OK或接了真实服务；本机未编译/执行Swift或操作模拟器，heavy/simulator仍由主线程占用，完整验证交精确head CI。旧gear暂态在仅冷启自有QA后恢复，根因仍未证，未据此声称已修复现场原因。
+  - 当前main993cc686上App并集302方法/32文件，报告minimum302/301缩减拒绝同步；本机仅轻量静态验证：docs16指令对+7回归、report3、19语474UI+4权限与diff通过。独立worktree维护，不改primary；未发行、部署或改生产。
+  - PR #268/ca4b23ff完整CI已编译并实际执行302方法：旧299与Add真实root交接/context新两方法通过；认证提示/dismiss/reopen方法超时（2条失败含抛出的timeout），尚未通过。不放宽条件，补每次等待的阶段/展示controller诊断及去重遍历后继续CI定位；不把红归因到现场gear，也不猜认证或改服务。
+  - 3e092d2f同302方法再执行，诊断确认Connect→实际root认证UIAlert通过，但notice消费后真实alert仍稳定显示，未走到Settings。临时fixture手动UIKit.dismiss会掩盖生产deviceApproval真实notice=nil消费者，独立review指出后移除；保留强external-nil→实际消失断言，生产改用原现代Bool alert API加冻结presenting Notice（不使用legacy item API），automatic false仍不消费、OK仍精确代次/owner。旧OK/new同文案模型隔离有回归，真实系统按钮激活及重新呈现另由后续WDA验收，不冒称已验。重基preview主线e97a171d保留ReadingLayout11，当前并集303/32files、minimum303/302缩减拒绝，继续精确head全CI。
+
+
 - 2026-10-16 Native 草稿预览阅读连续性（独立探索，组合验收继续）。
   - 上一caret #265 exact0f648ece全13CI绿/current-main后合bdf98e7b并finish：App296/296零失败/跳过（38.404秒test/91.887秒wall）、package459=59+400、19语9063精确编译值；RN默认/源码与共享服务未改。
   - WebDriver旧0f648ece实际系统Photos按顺序选三张本机fixture。初轮source19未冻结测量到点击间的输入，不独自证明预览时移动；随后冻结自有合成peer、稳定呈现后恢复流式的旧版source23对照，关闭后同一行y173→-300（-473pt）、Latest不出现。修复43552eb2受控source21关闭后y173→173（0pt）、Latest保留；两者同三draft引用/原UTF8、只新增一次受控输入，非真实模型/Relay证据。现在每会话弱handle同步暂停当前可见UIKit表格，再向host原样转发open intent；不以following绑定假暂停。更新先解绑旧owner，旧dismantle不能清新owner，展开编辑器零高度不捕获空锚点；原初始化/apply/restoration保护不动。
