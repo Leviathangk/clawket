@@ -1,5 +1,11 @@
 # PROGRESS · Clawket 3.0 进度日志
 
+- 2026-10-17 Native USB iPhone OpenClaw 连接交付测试（RN 保持默认）。
+  - 按 owner 明确要求安装真机开发版。唯一 USB iPhone 的 IORegistry 硬件标识与 CoreDevice wired 记录完全匹配，目标为 iPhone Air/iOS27.0.1；现有开发者模式、配对及 WDA profile 均有效。fresh main0ceb1edf 独立工作树、ios/heavy 租约及 jobs2 开发编译69.9秒通过，校验QA bundle、deep strict codesign和profile包含该硬件后，仅更新安装 com.p697.clawket.nativeqa/3.1.2。未卸载、清数据、替换RN或打Archive/IPA；仅关闭自有QA模拟器，未碰其他模拟器/无线手机。
+  - 实际有线WebDriver使用产品Direct表单；已知LAN endpoint仍对应本机当前接口/既有Gateway端口，不改bind/TLS/认证或重启服务。令牌只由当前已知operator配置在进程内读取，经系统Paste填入SecureField，随后手机临时剪贴板改为中性文本；保存复用同URL/transport的已有Native连接与label，其他连接保留。凭据通过后出现真实当前device-approval context，不再是上轮AUTH_TOKEN_MISMATCH。
+  - 当前App公钥指纹与唯一pending的32字节公钥SHA256、operator角色及Native默认7 scopes逐项匹配。首个CLI --url+env-auth在参数校验被拒；默认list可能local fallback，不能算Gateway RPC认证。首次approve返回1且错误未保留，原因未证，未盲重放。改用子进程env URL+token的正式loopback shared-auth读取，确认旧pending/paired均无该身份，再由App显式Check again取得不同requestId、30秒内新请求，同当前UI指纹/角色/scopes再核后仅批准该精确请求，CLI返回0，再走正常握手。
+  - 真机实际显示已连接及4个OpenClaw Agent；只重启QA App后再次达到ready、4项目录、无Alert，截图已实际查看。未发测试消息，推理/Stop/上传/弱网/Relay/完整N5不据此通过，留给owner在该开发版先测。自有WDA已定向停止并确认runner75，ios/heavy已释放，手机留在OpenClaw目录；Gateway仅新增该Native客户端的精确设备批准，无共享服务配置/凭据轮换/发布变更。
+
 - 2026-10-17 Native 第一轮 UI 初验独立入口（RN 保持默认）。
   - 原合成peer进程已退出，原Studio当前只有缓存/正在重连；不以新peer冒充原physical恢复。另起专用UI peer、新physical及新saved connection，显示名「Clawket · UI 体验」，已实际通过产品连接表单建立。WebDriver仅发送一次文字与三张已知fixture图片，独立stats为acceptedSends1/completedRuns1/active0/images3/dedupe0；完成窗口App无Alert/Stop，一张新回复图片实际原生QuickLook→完成通过。这是新合成UI窗口，不是真模型或原连接恢复验收。
   - 原Studio空draft原UTF8及三资源ID/顺序与baseline完全一致，未发held。真实Hermes长回复已通过，Native Stop、OpenClaw认证、Relay/弱网恢复仍未通过；VoiceOver/完整N5与owner接受未完成，不以文档/CI替代UI或模型验收。
@@ -2508,7 +2514,8 @@ Clawket 3.0 围绕统一 Agent 花名册与持续线程重构：新增 Hermes �
 | 编号 | 事项 | 怎么做 | 验证方法 | 状态 |
 |---|---|---|---|---|
 | HT-NATIVE-SSD-1016 | 已解除：模拟器磁盘空间 | 负责人要求代理自行清理后，迁出可重建缓存/工具链，使用苹果工具清理本任务失败导入的暂存镜像，并将四台长期关闭的旧测试模拟器完整双 SHA 校验冷归档到 SSD，保留原 UUID、App 数据与显式恢复脚本；最近使用的设备留原位。 | 标准 iOS 27.0 与原有 27.1 运行时均已实际安装为 Ready；独立普通 iPhone QA 已创建，实际 UI/连接验收继续。 | 无需负责人清理或开启完全磁盘访问，未更改系统授权。外置设备集试切换已回滚，四台冷归档设备需恢复后使用；归档及恢复说明保留在本机开发归档目录，数据未丢弃。 |
-| HT-NATIVE-WDA-1016 | 指定 USB 测试机 WebDriver 前置开关信息 | 仅在指定USB测试iPhone查看设置→开发者→启用UI自动化；异步回复已开/刚开启/稍后查看，不涉及个人无线手机。 | 实际WDA ready并建立QA session后才继续手机验收；开关状态或host Developer mode均不单独证明故障原因。 | 已询问，驱动三轮启用automation mode超时；独立native实现/模拟器/CI继续，无整机设置改变。 |
+| HT-NATIVE-WDA-1016 | 已解除：指定 USB 测试机 WebDriver 前置条件 | 本轮重新逐次匹配唯一USB iPhone硬件标识与CoreDevice wired，验证既有profile后启动WDA并建立独立QA session。 | 真实产品表单、当前设备批准与OpenClaw冷重连均通过该有线session操作。 | 2026-10-17已实际ready；无需负责人再处理开关，未修改系统授权。先前三轮automation-mode超时原因仍未证，不由本轮成功倒推。 |
+| HT-NATIVE-OWNER-1017 | 独立原生 iOS 手机初验 | 已在USB iPhone Air安装Clawket Native；当前OpenClaw是该Mac的LAN直连。负责人先体验真实聊天、上传、停止生成、重连与UI方向，RN继续默认。 | 实际功能与视觉由负责人验收；模拟器、编译及连接目录不代替推理/完整N5或原生替换决定。 | 真机认证、精确设备批准、4个Agent目录及QA App冷重连通过；未发测试消息，已停自动化并交还手机，待负责人测试反馈。 |
 | HT-NATIVE-UPGRADE-1016 | Native iOS 同 bundle 原安装升级验收与发布授权 | 所有原生数据消费者接入后，由负责人选择原签名/entitlement 的升级测试路径及发布阶段；独立 QA App 不覆盖商店 App。 | 保留原设备身份/六后端连接/作用域令牌/购买身份与一次性权益、草稿/缓存/未发送资源；失败可重试且原数据未删，实际升级后两后端重连与基础功能通过。 | ClawketUpgrade 只读来源/事务保全模块25项通过；host 激活与签名同 bundle 连续性待后续，未制作分发包或发布。 |
 | HT-DUO-INPUT-1013 | Duo 真实交互验收的备用自动化授权 | 回答已发送的异步问题，明确允许使用苹果 XCTest/XCUITest 在专用本地模拟器输入、长按、滚动与断言。CUA 坐标/拖动持续 noWindowsAvailable，键盘未生效；工具规则要求用户明确指定其他 UI 自动化后才能使用。 | 真实选图完成隔离配对，再验证中文草稿、长按、分屏、折叠/旋转和恢复；结果不能由单元测试替代。 | 已解决：负责人明确允许XCTest/XCUITest；原生交互证据已完成，session06/08正常退出。最终主分支交付与负责人验收见PR #220及本机acceptance.html。 |
 | HT-DUO-TOOLCHAIN-1013 | Duo 工具链的本机认证与系统重启 | 已授权下载 macOS26.7.1、同意 Xcode27.1/SDK 许可；负责人完成本机管理员认证，并确认安装/重启时机。无需在聊天提供密码。 | 升级后 macOS≥26.6，Xcode27.1 初始化成功，可安装官方 Duo runtime 并继续分支原生验收。 | 已完成：负责人授权重启后macOS26.7.1、Xcode27.1初始化与Duo runtime安装成功，首个Debug包已运行；原生体验验收继续。 |
