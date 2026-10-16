@@ -1,4 +1,4 @@
-import ClawketRuntime
+@testable import ClawketRuntime
 import ClawketTransport
 import ClawketUI
 import Foundation
@@ -17,6 +17,58 @@ final class NativeLiveMessagesTests: XCTestCase {
                         attachments: Bool = false) -> String? {
         NativeLiveMessages.finish(runID: "run", segmentID: segment, metadata: metadata, notice: notice,
             hasAttachments: attachments, in: &document, epoch: epoch)
+    }
+
+    func testActualHermesMapperAccumulatesUnicodeFragmentsAndKeepsFullFinalRenderID() throws {
+        let connection = BackendConnection(id: "synthetic-hermes", backendKind: .hermes, transportKind: .local,
+            label: "Synthetic", url: URL(string: "ws://127.0.0.1:1")!)
+        let originalDraft = "Independent e\u{301} draft"
+        var mapper = SessionEvents(), document = NativeConversation(draft: originalDraft, historyEpoch: epoch)
+        // Same chat envelope as the Bridge's message.delta/full final producer.
+        var sequence = 0
+        func chat(_ text: String, state: String = "delta") -> JSONValue {
+            sequence += 1
+            return .object(["type": .string("event"), "event": .string("chat"), "payload": .object([
+                "runId": .string("fixture-run"), "sessionKey": .string("session"), "seq": .number(Double(sequence)),
+                "state": .string(state), "message": .object(["role": .string("assistant"), "content": .string(text)])])])
+        }
+        func mappedText(_ frame: JSONValue) throws -> RuntimeTextUpdate {
+            let updates = try mapper.map(frame, connection: connection)
+            guard case let .text(value)? = updates.first else {
+                throw RuntimeFailure(.invalidResponse)
+            }
+            XCTAssertNil(value.snapshotMetadata)
+            XCTAssertTrue(NativeLiveMessages.text(value, in: &document, epoch: epoch))
+            return value
+        }
+        let chunks = ["NO", "RMAL", " ", "NO", "_", "REPLY", "\n", "先", " ", "e", "\u{301}",
+                      "👩", "\u{200D}", "💻", "\r\n", "\t", "段"]
+        XCTAssertEqual(try mappedText(chat(chunks[0])).mode, .delta)
+        let firstID = document.messages[0].id
+        for index in 1..<chunks.count {
+            let update = try mappedText(chat(chunks[index]))
+            XCTAssertEqual(update.mode, .delta)
+            XCTAssertEqual(document.messages.count, 1)
+            XCTAssertEqual(document.messages[0].id, firstID)
+            XCTAssertEqual(Data(document.messages[0].text.utf8), Data(chunks.prefix(index + 1).joined().utf8))
+        }
+        let finalText = chunks.joined() + " — corrected complete final"
+        let final = try mapper.map(chat(finalText, state: "final"), connection: connection)
+        XCTAssertEqual(final.count, 2)
+        guard case let .text(snapshot) = final[0], case let .runFinished(_, runID, _, segmentID, _) = final[1] else {
+            return XCTFail("Missing full final snapshot and authoritative completion")
+        }
+        XCTAssertEqual(snapshot.mode, .snapshot)
+        XCTAssertTrue(NativeLiveMessages.text(snapshot, in: &document, epoch: epoch))
+        XCTAssertEqual(NativeLiveMessages.finish(runID: runID, segmentID: segmentID,
+            metadata: final[1].finalMessageMetadata(backend: .hermes), notice: nil, hasAttachments: false,
+            in: &document, epoch: epoch), firstID)
+        XCTAssertEqual(document.messages.map(\.id), [firstID])
+        XCTAssertEqual(Data(document.messages[0].text.utf8), Data(finalText.utf8))
+        XCTAssertEqual(document.messages[0].liveSnapshotState, .terminal)
+        XCTAssertTrue(document.messages.allSatisfy { !$0.streaming && $0.providedID == nil && !$0.local })
+        XCTAssertEqual(Data(document.draft.utf8), Data(originalDraft.utf8))
+        XCTAssertTrue(try mapper.map(chat("late"), connection: connection).isEmpty)
     }
 
     func testDeltaSnapshotAndParagraphBoundariesKeepIndependentRenderIDsAndActualLineage() throws {

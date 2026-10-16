@@ -82,7 +82,14 @@ struct SessionEvents: Sendable {
         let metadata = FinalMessageWire.metadata(payload, sessionKey: key, backend: backend)
             .flatMap { $0.providedID == nil ? nil : $0 }
         switch payload["state"]?.stringValue {
-        case "delta": return textEvent(protocolText(payload["message"]?["content"]), runID: runID, mode: .snapshot, raw: payload, snapshotMetadata: metadata)
+        case "delta":
+            // Hermes forwards each message.delta fragment; OpenClaw sends the
+            // cumulative message. A fragment supplies neither snapshot identity
+            // nor a complete silent-reply prefix ("NO" may begin "NORMAL").
+            let mode: RuntimeTextUpdate.Mode = backend == .hermes ? .delta : .snapshot
+            return textEvent(protocolText(payload["message"]?["content"]), runID: runID, mode: mode, raw: payload,
+                             snapshotMetadata: mode == .snapshot ? metadata : nil,
+                             suppressSilentPrefix: backend != .hermes)
         case "final": return complete(runID: runID, reason: "end_turn", raw: payload, snapshotMetadata: metadata)
         case "aborted": return finish(runID: runID, reason: "cancelled", raw: payload)
         case "error": return finish(runID: runID, reason: "error", raw: payload)
@@ -114,9 +121,11 @@ struct SessionEvents: Sendable {
     }
 
     private mutating func textEvent(_ text: String, runID: String, mode: RuntimeTextUpdate.Mode, raw: JSONValue,
-                                   snapshotMetadata: RuntimeFinalMessageMetadata? = nil) -> [RuntimeSessionUpdate] {
+                                   snapshotMetadata: RuntimeFinalMessageMetadata? = nil,
+                                   suppressSilentPrefix: Bool = true) -> [RuntimeSessionUpdate] {
         let text = openClawArtifacts ? RuntimeAttachmentProjection.stripMediaDirectives(text) : text
-        guard var run = runs[Data(runID.utf8)], !run.terminal, !text.isEmpty, !silentPrefix(text) else { return [] }
+        guard var run = runs[Data(runID.utf8)], !run.terminal, !text.isEmpty,
+              !(suppressSilentPrefix && silentPrefix(text)) else { return [] }
         run.hasText = true; runs[Data(runID.utf8)] = run
         return [.text(RuntimeTextUpdate(sessionKey: run.sessionKey, runID: runID, segmentID: "\(runID):reply:\(run.segment)",
                                        text: text, mode: mode, turnID: snapshotMetadata == nil ? raw["turnId"]?.stringValue : snapshotMetadata?.turnID,
