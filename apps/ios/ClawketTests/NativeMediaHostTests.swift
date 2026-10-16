@@ -143,17 +143,41 @@ final class NativeMediaHostTests: XCTestCase, @unchecked Sendable {
     }
 
     @MainActor
+    func testUnknownOwnedDraftResourceKeepsAFilePlaceholderWithoutPreviewAuthorityBeforeInspection() async throws {
+        let directory = root(); defer { try? FileManager.default.removeItem(at: directory) }
+        let model = NativeAppModel(), route = ConversationID(connectionID: "c", agentID: "a", sessionID: "s")
+        let media = try NativeMediaController(directory: directory)
+        let resource = try await media.library.adopt(media.stager.stageData(Data("Synthetic file".utf8), name: "qa-file.txt", mimeType: "text/plain"))
+        model.media = media; model.documents[route] = NativeConversation(draftResourceIDs: [resource.id])
+        model.refreshDraftMedia(route)
+        let display = try XCTUnwrap(model.presentation.draft(for: route).attachments.first)
+        XCTAssertEqual(display.id, resource.id.uuidString.lowercased())
+        XCTAssertEqual(display.kind, .file); XCTAssertEqual(display.phase, .preparing)
+        XCTAssertFalse(display.canOpen); XCTAssertTrue(display.canRemove)
+        // This test asserts the synchronous cold placeholder, not a current
+        // connection or a successful inspection. Retire its owned read explicitly.
+        let reads = Array(model.mediaLoads.values)
+        for read in reads { read.cancel() }
+        for read in reads { await read.value }
+        XCTAssertTrue(model.mediaLoads.isEmpty)
+    }
+
+    @MainActor
     func testActualDraftMediaProjectionKeepsReadyAndPendingInTheirOriginalSlots() {
         let model = NativeAppModel(), route = ConversationID(connectionID: "c", agentID: "a", sessionID: "s")
         model.documents[route] = NativeConversation()
         let first = UUID(), second = UUID(), resource = UUID()
         let scope = NativeMediaScope(route: route, activation: UUID(), selection: UUID(), draft: UUID())
-        model.mediaImports[first] = .init(id: first, scope: scope, name: "A")
+        model.mediaImports[first] = .init(id: first, scope: scope, name: "A", displayKind: .image)
         model.refreshDraftMedia(route)
         let displayA = model.presentation.draft(for: route).attachments[0].displayID
+        XCTAssertEqual(model.presentation.draft(for: route).attachments[0].kind, .image)
+        XCTAssertEqual(model.presentation.draft(for: route).attachments[0].phase, .preparing)
+        XCTAssertFalse(model.presentation.draft(for: route).attachments[0].canOpen)
         model.mediaImports[second] = .init(id: second, scope: scope, name: "B")
         model.refreshDraftMedia(route)
         let displayB = model.presentation.draft(for: route).attachments[1].displayID
+        XCTAssertEqual(model.presentation.draft(for: route).attachments[1].kind, .file)
         model.mediaDraftOrder[route]?.complete(importID: second, resourceID: resource)
         model.documents[route]?.draftResourceIDs = [resource]
         model.mediaImports.removeValue(forKey: second)
