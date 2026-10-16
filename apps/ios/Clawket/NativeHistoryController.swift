@@ -1,6 +1,7 @@
 import ClawketRuntime
 import ClawketUI
 import Foundation
+import Combine
 
 struct NativeHistoryAccess: Sendable {
     var search = false
@@ -26,19 +27,22 @@ struct NativeHistoryExportRequest: Identifiable, Sendable {
 }
 
 @MainActor
-final class NativeHistoryController {
+final class NativeHistoryController: ObservableObject {
+    @Published private(set) var accessRevision = UUID()
+    var upgrade: (UUID) -> Void = { _ in }
+    func accessChanged() { accessRevision = UUID() }
     let saved: NativeSavedConversations
     let conversations: NativeConversationStore
     let media: NativeMediaController?
     private let runtime: RuntimeCoordinator
-    private let exports: NativeHistoryExportCache
+    private let exports: any NativeHistoryExportPreparing
     private let current: (NativeHistoryExportContext) -> Bool
     /// The entitlement integration supplies verified features. A missing provider
     /// leaves Pro search/bulk export unavailable without inventing a purchase state.
     let access: () -> NativeHistoryAccess
 
     init(saved: NativeSavedConversations, conversations: NativeConversationStore, media: NativeMediaController?,
-         runtime: RuntimeCoordinator, exports: NativeHistoryExportCache,
+         runtime: RuntimeCoordinator, exports: any NativeHistoryExportPreparing,
          current: @escaping (NativeHistoryExportContext) -> Bool,
          access: @escaping () -> NativeHistoryAccess = { .init() }) {
         self.saved = saved; self.conversations = conversations; self.media = media
@@ -68,6 +72,17 @@ final class NativeHistoryController {
         return .init(url: file.url, shareLease: file.lease)
     }
 
+    func share(_ value: NativePublicTranscript, request: NativeHistoryExportRequest,
+               format: NativeHistoryExportFormat) async throws -> NativeMediaShare {
+        guard isCurrent(request.context) else { throw NativeHistoryExportFailure.changed }
+        let prepared = try await share(value, format: format)
+        guard isCurrent(request.context) else {
+            await prepared.releaseIfUnpresented()
+            throw NativeHistoryExportFailure.changed
+        }
+        return prepared
+    }
+
     func sharePhysical(_ conversation: NativeConversation, title: String, format: NativeHistoryExportFormat) async throws -> NativeMediaShare {
         let file = try await exports.preparePhysical(conversation, title: title, format: format,
             userLabel: String(localized: "User"), assistantLabel: String(localized: "Assistant"),
@@ -81,7 +96,11 @@ final class NativeHistoryController {
         try Task.checkCancellation()
         guard access().bulkExport else { throw NativeHistoryFailure.unavailable }
         let file = try await exports.prepareBulk(values)
-        return .init(url: file.url, shareLease: file.lease)
+        let share = NativeMediaShare(url: file.url, shareLease: file.lease)
+        guard !Task.isCancelled, access().bulkExport else {
+            await share.releaseIfUnpresented(); throw NativeHistoryFailure.unavailable
+        }
+        return share
     }
 
     func cachedPreview(_ reference: NativeMediaReference, scope: NativeHistoryScope, historyEpoch: UUID? = nil) async throws -> NativeMediaPreview {

@@ -121,7 +121,16 @@ public struct NativeClientView: View {
             } else {
                 ForEach(filteredAgents) { agent in
                     Group {
-                        switch agent.entryMode {
+                        if agent.requiresUpgrade {
+                            Button {
+                                let id: AgentCatalogID
+                                switch agent.entryMode {
+                                case let .conversation(route): id = .init(connectionID: route.connectionID, agentID: route.agentID)
+                                case let .catalog(value): id = value
+                                }
+                                onIntent(.reviewProAgent(id))
+                            } label: { AgentRow(agent: agent) }.buttonStyle(.plain)
+                        } else { switch agent.entryMode {
                         case let .conversation(route):
                             if route.isConcrete {
                                 NavigationLink(value: route) { AgentRow(agent: agent) }
@@ -132,10 +141,10 @@ public struct NativeClientView: View {
                                 sheet = .catalog(id)
                             } label: { AgentRow(agent: agent) }
                                 .buttonStyle(.plain)
-                        }
+                        } }
                     }
                     .contextMenu { rosterActions(agent) }
-                    .disabled(!agent.availability.isEnabled)
+                    .disabled(!agent.availability.isEnabled && !agent.requiresUpgrade)
                     .accessibilityIdentifier("agent-\(agent.id)")
                     .listRowSeparator(.hidden)
                     .listRowInsets(EdgeInsets(top: 11, leading: 20, bottom: 11, trailing: 20))
@@ -274,6 +283,7 @@ private struct AgentRow: View {
                     Text(agent.name).font(.body.weight(.semibold)).foregroundStyle(.primary)
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                     Spacer(minLength: 0)
+                    if agent.requiresUpgrade { Image(systemName: "lock").font(.caption).foregroundStyle(.secondary).accessibilityLabel("Upgrade to Pro") }
                     if agent.isPinned && agent.kind == .agent { Image(systemName: "pin.fill").font(.caption2).foregroundStyle(.secondary).accessibilityLabel("Pinned") }
                     if !dynamicTypeSize.isAccessibilitySize, let time = agent.timeLabel {
                         Text(time).font(.caption).foregroundStyle(.tertiary).lineLimit(1)
@@ -459,6 +469,21 @@ private struct NativeConversationView: View {
             .opacity(expanded ? 0 : 1)
             .accessibilityHidden(expanded)
 
+            if conversation.availability(.pro).isVisible {
+                Button {
+                    onIntent(.openDestination(.pro, conversation: conversation.id))
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "lock.open")
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("View the full conversation").font(.callout.weight(.semibold))
+                            Text("Latest messages · read-only preview").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                    }.frame(minHeight: 44).padding(.horizontal, 20).padding(.vertical, 8)
+                }.buttonStyle(.plain).accessibilityIdentifier("conversation-upgrade")
+            }
             if let work = conversation.work, work.inspect.isVisible, !work.id.isEmpty {
                 NativeWorkDock(work: work) {
                     guard let intent = work.openIntent(conversationID: conversation.id) else { return }

@@ -94,13 +94,13 @@ public enum ClientFeature: String, Hashable, Sendable {
     case sessions, newSession, models, send, stop, voice
     case photos, camera, files, paste, skills, commands, schedule, tools, sessionFiles
     case agentSettings, memory, connectionSettings, loadEarlier, sessionManagement, modelControls
-    case savedHistory, exportConversation, previousTranscripts
+    case savedHistory, exportConversation, previousTranscripts, pro
 }
 
 public enum ClientDestination: String, Hashable, Sendable {
     case account, addConnection, createAgent, newSession, agentSettings, memory
     case connectionSettings, skills, commands, schedule, tools, sessionFiles
-    case savedHistory, exportConversation, previousTranscripts
+    case savedHistory, exportConversation, previousTranscripts, pro
 }
 
 public enum AttachmentSource: String, Hashable, Sendable {
@@ -168,6 +168,8 @@ public struct AgentPresentation: Identifiable, Hashable, Sendable {
     public var availability: ActionAvailability
     public var isPinned: Bool
     public var localActions: RosterActionsPresentation
+    /// Host-provided purchase review affordance, never backend readiness or ownership.
+    public var requiresUpgrade = false
 
     public init(id: String, entryMode: AgentEntryMode, kind: Kind = .agent, name: String,
                 subtitle: String = "", backendLabel: String? = nil, symbol: String? = nil,
@@ -682,6 +684,7 @@ public enum ClientIntent: Sendable {
     case markAgentRead(AgentCatalogID)
     case markSessionRead(ConversationID)
     case conversationReadingVisibilityChanged(ConversationID, viewID: UUID, scopeID: UUID, visible: Bool)
+    case reviewProAgent(AgentCatalogID)
     case openAgentCatalog(AgentCatalogID)
     case selectCatalogProject(AgentCatalogID, projectID: String?)
     case createSession(AgentCatalogID, projectID: String?)
